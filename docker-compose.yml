@@ -1,0 +1,80 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: stockpilot_db
+    environment:
+      POSTGRES_USER: stockpilot
+      POSTGRES_PASSWORD: stockpilot
+      POSTGRES_DB: stockpilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - stockpilot_pgdata:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stockpilot -d stockpilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: stockpilot_redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    container_name: stockpilot_backend
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://stockpilot:stockpilot@db:5432/stockpilot
+      REDIS_URL: redis://redis:6379/0
+      INGESTION_MODE: auto
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    build: ./backend
+    container_name: stockpilot_worker
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://stockpilot:stockpilot@db:5432/stockpilot
+      REDIS_URL: redis://redis:6379/0
+      INGESTION_MODE: auto
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: rq worker stockpilot --url redis://redis:6379/0
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+    container_name: stockpilot_frontend
+    environment:
+      VITE_API_URL: /api
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  stockpilot_pgdata:

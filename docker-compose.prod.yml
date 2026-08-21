@@ -1,0 +1,120 @@
+# ============================================================
+# StockPilot AI — Production (Docker Compose)
+# Usage : docker compose -f docker-compose.prod.yml up -d --build
+# Variables à définir dans .env (voir .env.prod.example)
+# ============================================================
+
+x-backend-env: &backend-env
+  env_file:
+    - .env
+  environment:
+    DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-stockpilot}:${POSTGRES_PASSWORD:-stockpilot}@db:5432/${POSTGRES_DB:-stockpilot}
+    REDIS_URL: redis://redis:6379/0
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: stockpilot_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-stockpilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stockpilot}
+      POSTGRES_DB: ${POSTGRES_DB:-stockpilot}
+    volumes:
+      - stockpilot_pgdata:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./backups/db:/backups
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-stockpilot} -d ${POSTGRES_DB:-stockpilot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: stockpilot_redis
+    command: redis-server --appendonly yes
+    volumes:
+      - stockpilot_redis:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    container_name: stockpilot_backend
+    <<: *backend-env
+    ports:
+      - "8000:8000"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    restart: unless-stopped
+
+  worker:
+    build: ./backend
+    container_name: stockpilot_worker
+    <<: *backend-env
+    command: rq worker ${RQ_QUEUE_NAME:-stockpilot} --url redis://redis:6379/0
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+    container_name: stockpilot_frontend
+    environment:
+      VITE_API_URL: /api
+    restart: unless-stopped
+
+  # Reverse proxy HTTPS (Let's Encrypt automatique via Caddy)
+  caddy:
+    image: caddy:2-alpine
+    container_name: stockpilot_caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+
+  # Sauvegarde quotidienne PostgreSQL (7 jours de rétention)
+  backup:
+    image: postgres:16-alpine
+    container_name: stockpilot_backup
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-stockpilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stockpilot}
+      POSTGRES_DB: ${POSTGRES_DB:-stockpilot}
+    volumes:
+      - ./backups/db:/backups
+    entrypoint: |
+      sh -c 'while true; do
+        ts=$$(date +%Y%m%d_%H%M);
+        pg_dump -h db -U $$POSTGRES_USER -d $$POSTGRES_DB -Fc -f /backups/stockpilot_$$ts.dump;
+        find /backups -name "*.dump" -mtime +7 -delete;
+        echo "[backup] $$ts OK";
+        sleep 86400;
+      done'
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  stockpilot_pgdata:
+  stockpilot_redis:
+  caddy_data:
+  caddy_config:

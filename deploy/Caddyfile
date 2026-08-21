@@ -1,0 +1,23 @@
+# StockPilot AI — Reverse proxy HTTPS (Caddy)
+# ⚠️ Remplacez stockpilot.example.com par VOTRE domaine (ou utilisez l'adresse IP avec :80)
+stockpilot.example.com {
+    encode zstd gzip
+
+    # Frontend React (conteneur nginx interne)
+    handle /api/* {
+        reverse_proxy backend:8000
+    }
+    handle /metrics {
+        reverse_proxy backend:8000
+    }
+    handle {
+        reverse_proxy frontend:80
+    }
+
+    # Sécurité basique
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options SAMEORIGIN
+        Referrer-Policy strict-origin-when-cross-origin
+    }
+}
