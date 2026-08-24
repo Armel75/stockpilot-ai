@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "sessionId": "session-e2305d0e-cbaf-4667-9f12-b3f201a854b4",
+  "cwd": "c:\\Users\\DEFFO_A\\Lovable_Project\\stockpilot-ai",
+  "checkpoints": [
+    {
+      "turn": 1,
+      "commit": "c00352b2a7aaf58a60fb21d378550fafe178d8ce",
+      "parent": "c00352b2a7aaf58a60fb21d378550fafe178d8ce",
+      "time": 1787398269857,
+      "untracked": [],
+      "truncated": false
+    }
+  ],
+  "rolls": [],
+  "updatedAt": 1787398270861
+}
