@@ -1,0 +1,94 @@
+{
+  "version": 2,
+  "sessionId": "session-cb1572e0-b003-4e74-868c-1b57ca1be334",
+  "cwd": "c:\\Users\\DEFFO_A\\Lovable_Project\\stockpilot-ai",
+  "updatedAt": 1787585472562,
+  "checkpoints": [
+    {
+      "turn": 1,
+      "commit": "16244306a73fb62e6a7028fd769b387f5f46213f",
+      "parent": "16244306a73fb62e6a7028fd769b387f5f46213f",
+      "time": 1787574313182,
+      "untracked": [],
+      "truncated": false
+    },
+    {
+      "turn": 2,
+      "commit": "16244306a73fb62e6a7028fd769b387f5f46213f",
+      "parent": "16244306a73fb62e6a7028fd769b387f5f46213f",
+      "time": 1787576309973,
+      "untracked": [],
+      "truncated": false
+    },
+    {
+      "turn": 3,
+      "commit": "16244306a73fb62e6a7028fd769b387f5f46213f",
+      "parent": "16244306a73fb62e6a7028fd769b387f5f46213f",
+      "time": 1787579914451,
+      "untracked": [],
+      "truncated": false,
+      "after": {
+        "commit": "5cc5ee8ec737aafd44a1f570f3f623cc8699ecb5",
+        "time": 1787584435512
+      }
+    },
+    {
+      "turn": 4,
+      "commit": "5cc5ee8ec737aafd44a1f570f3f623cc8699ecb5",
+      "parent": "5cc5ee8ec737aafd44a1f570f3f623cc8699ecb5",
+      "time": 1787584576492,
+      "untracked": [],
+      "truncated": false,
+      "after": {
+        "commit": "d28387f132859a83c7e957e432fc2e01cf71b0c8",
+        "time": 1787584890135
+      }
+    },
+    {
+      "turn": 5,
+      "commit": "d28387f132859a83c7e957e432fc2e01cf71b0c8",
+      "parent": "d28387f132859a83c7e957e432fc2e01cf71b0c8",
+      "time": 1787584986162,
+      "untracked": [
+        "backend/_check_fresh.py"
+      ],
+      "truncated": false
+    },
+    {
+      "turn": 6,
+      "commit": "d28387f132859a83c7e957e432fc2e01cf71b0c8",
+      "parent": "d28387f132859a83c7e957e432fc2e01cf71b0c8",
+      "time": 1787585053370,
+      "untracked": [
+        "backend/_check_fresh.py"
+      ],
+      "truncated": false
+    },
+    {
+      "turn": 7,
+      "commit": "d28387f132859a83c7e957e432fc2e01cf71b0c8",
+      "parent": "d28387f132859a83c7e957e432fc2e01cf71b0c8",
+      "time": 1787585161650,
+      "untracked": [
+        "backend/_check_fresh.py"
+      ],
+      "truncated": false
+    },
+    {
+      "turn": 8,
+      "commit": "d28387f132859a83c7e957e432fc2e01cf71b0c8",
+      "parent": "d28387f132859a83c7e957e432fc2e01cf71b0c8",
+      "time": 1787585443366,
+      "untracked": [
+        "backend/_check_fresh.py"
+      ],
+      "truncated": false,
+      "after": {
+        "commit": "f8bc9c57a641104a86b2b1ba8e7b9956f4571290",
+        "time": 1787585471095
+      }
+    }
+  ],
+  "rolls": [],
+  "undos": []
+}

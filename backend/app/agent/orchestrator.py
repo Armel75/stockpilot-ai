@@ -129,7 +129,10 @@ def _narrate_and_persist(
                 product_name=a.product_name or None,
                 confidence=a.confidence,
                 action=a.action,
-                evidence=[e.model_dump() for e in a.evidence],
+                evidence=[
+                    e.model_dump() if hasattr(e, "model_dump") else e
+                    for e in a.evidence
+                ],
             )
         )
 

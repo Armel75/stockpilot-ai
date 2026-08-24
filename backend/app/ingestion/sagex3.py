@@ -1,14 +1,17 @@
 """Ingestion SAGE X3 — lecture des vues SQL Server (ODBC Driver 18).
 
-⚠️ ADAPTEZ ICI : les noms de colonnes de VOS vues X3 (V_VENTES / V_STOCKS).
-Le mapping ci-dessous est une hypothèse documentée — ajustez-le à votre schéma réel.
+⚠️ ADAPTEZ ICI : les noms de colonnes de VOS vues X3.
+Mapping validé sur les vues réelles du parc (base `basex3`) :
+  - Ventes : `VENTES_X3` (REFERENCE, DESIGNATION, FAMILLE, DATE_FACTURE, QTE)
+             → agrégées par (référence, jour) pour respecter la contrainte d'unicité.
+  - Stocks : `STOCK_TOTAL` (CODE_X3, QTE_TT) → total par produit, date = jour J.
 """
 import logging
 from datetime import date, datetime
 from typing import Any
 
 import pyodbc
-from sqlalchemy import delete
+from sqlalchemy import delete, insert
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -21,21 +24,24 @@ settings = get_settings()
 # ADAPTEZ ICI : mapping colonnes des vues X3
 # ---------------------------------------------------------------
 SALES_COLS = {
-    "ref": "PRODUIT_REF",
-    "name": "PRODUIT_DESIGNATION",
+    "ref": "REFERENCE",
+    "name": "DESIGNATION",
     "category": "FAMILLE",
     "date": "DATE_FACTURE",
-    "quantity": "QUANTITE",
-    "revenue": "MONTANT",
+    "quantity": "QTE",
+    # pas de colonne montant : le chiffre d'affaires est confidentiel (revenue = 0)
 }
 
 STOCK_COLS = {
-    "ref": "PRODUIT_REF",
-    "date": "DATE_STOCK",
-    "quantity": "STOCK",
-    "reserved": "RESERVE",
-    "in_transit": "EN_TRANSIT",
+    "ref": "CODE_X3",
+    "name": "DESIGNATION",
+    "category": "FAMILLE",
+    "quantity": "QTE_TT",
+    # pas de colonne date : snapshot au jour de l'ingestion
 }
+
+# Fenêtre d'historique de ventes chargée (jours)
+SALES_WINDOW_DAYS = 270
 
 
 def _connstr(server: str, database: str, user: str, password: str, driver: str) -> str:
@@ -65,11 +71,15 @@ def _connect(server: str, database: str, user: str, password: str, driver: str) 
 def _fetch_sales() -> list[dict[str, Any]]:
     cols = SALES_COLS
     sql = (
-        f"SELECT [{cols['ref']}] AS ref, [{cols['name']}] AS name, "
-        f"[{cols['category']}] AS category, [{cols['date']}] AS date, "
-        f"[{cols['quantity']}] AS quantity, [{cols['revenue']}] AS revenue "
+        f"SELECT [{cols['ref']}] AS ref, "
+        f"MAX([{cols['name']}]) AS name, "
+        f"MAX([{cols['category']}]) AS category, "
+        f"CONVERT(date, [{cols['date']}]) AS date, "
+        f"SUM([{cols['quantity']}]) AS quantity "
         f"FROM [{settings.X3_SALES_VIEW}] "
-        f"WHERE [{cols['date']}] >= DATEADD(day, -270, GETDATE())"
+        f"WHERE [{cols['date']}] >= DATEADD(day, -{SALES_WINDOW_DAYS}, GETDATE()) "
+        f"AND [{cols['date']}] <= GETDATE() "  # exclut les documents datés dans le futur (pré-factures)
+        f"GROUP BY [{cols['ref']}], CONVERT(date, [{cols['date']}])"
     )
     conn = _connect(
         settings.X3_SALES_SERVER, settings.X3_SALES_DATABASE,
@@ -80,7 +90,7 @@ def _fetch_sales() -> list[dict[str, Any]]:
         cursor.execute(sql)
         columns = [c[0] for c in cursor.description]
         rows = [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
-        logger.info("X3 VENTES : %d lignes", len(rows))
+        logger.info("X3 VENTES : %d lignes (agrégées réf×jour, fenêtre %d j)", len(rows), SALES_WINDOW_DAYS)
         return rows
     finally:
         conn.close()
@@ -89,10 +99,12 @@ def _fetch_sales() -> list[dict[str, Any]]:
 def _fetch_stock() -> list[dict[str, Any]]:
     cols = STOCK_COLS
     sql = (
-        f"SELECT [{cols['ref']}] AS ref, [{cols['date']}] AS date, "
-        f"[{cols['quantity']}] AS quantity, "
-        f"[{cols['reserved']}] AS reserved, [{cols['in_transit']}] AS in_transit "
-        f"FROM [{settings.X3_STOCK_VIEW}]"
+        f"SELECT [{cols['ref']}] AS ref, "
+        f"MAX([{cols['name']}]) AS name, "
+        f"MAX([{cols['category']}]) AS category, "
+        f"SUM([{cols['quantity']}]) AS quantity "
+        f"FROM [{settings.X3_STOCK_VIEW}] "
+        f"GROUP BY [{cols['ref']}]"
     )
     conn = _connect(
         settings.X3_STOCK_SERVER, settings.X3_STOCK_DATABASE,
@@ -103,7 +115,7 @@ def _fetch_stock() -> list[dict[str, Any]]:
         cursor.execute(sql)
         columns = [c[0] for c in cursor.description]
         rows = [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
-        logger.info("X3 STOCKS : %d lignes", len(rows))
+        logger.info("X3 STOCKS : %d lignes (total par produit)", len(rows))
         return rows
     finally:
         conn.close()
@@ -145,7 +157,13 @@ def ingest_sagex3(db: Session) -> tuple[str, str]:
             ref = str(r.get("ref")).strip()
             refs.setdefault(ref, {"name": str(r.get("name") or "?"), "category": str(r.get("category") or "")})
         for r in stock_rows:
-            refs.setdefault(str(r.get("ref")).strip(), {"name": "?", "category": ""})
+            ref = str(r.get("ref")).strip()
+            # Les produits uniquement présents en stock reçoivent le vrai nom (si dispo)
+            refs.setdefault(ref, {"name": "?", "category": ""})
+            if refs[ref]["name"] == "?" and r.get("name"):
+                refs[ref]["name"] = str(r["name"])[:255]
+            if not refs[ref]["category"] and r.get("category"):
+                refs[ref]["category"] = str(r["category"])[:100]
 
         existing = {p.ref: p for p in db.query(Product).filter(Product.ref.in_(refs.keys())).all()}
         for ref, info in refs.items():
@@ -162,34 +180,44 @@ def ingest_sagex3(db: Session) -> tuple[str, str]:
         db.execute(delete(Sale))
         db.execute(delete(StockSnapshot))
 
-        sales_count = 0
+        sales_rows_db = []
         for r in sales_rows:
             ref = str(r.get("ref")).strip()
             pid = products.get(ref)
             if pid is None:
                 continue
-            db.add(Sale(
-                product_id=pid,
-                date=_to_date(r.get("date")),
-                quantity=_to_float(r.get("quantity")),
-                revenue=_to_float(r.get("revenue")),
-            ))
-            sales_count += 1
+            sales_rows_db.append(
+                {
+                    "product_id": pid,
+                    "date": _to_date(r.get("date")),
+                    "quantity": _to_float(r.get("quantity")),
+                    "revenue": _to_float(r.get("revenue")),  # 0.0 si absente (confidentiel)
+                }
+            )
 
-        stock_count = 0
+        stock_rows_db = []
         for r in stock_rows:
             ref = str(r.get("ref")).strip()
             pid = products.get(ref)
             if pid is None:
                 continue
-            db.add(StockSnapshot(
-                product_id=pid,
-                date=_to_date(r.get("date")),
-                quantity=_to_float(r.get("quantity")),
-                reserved=_to_float(r.get("reserved")),
-                in_transit=_to_float(r.get("in_transit")),
-            ))
-            stock_count += 1
+            stock_rows_db.append(
+                {
+                    "product_id": pid,
+                    "date": _to_date(r.get("date")) if r.get("date") else date.today(),
+                    "quantity": _to_float(r.get("quantity")),
+                    "reserved": _to_float(r.get("reserved")),
+                    "in_transit": _to_float(r.get("in_transit")),
+                }
+            )
+
+        # Insertion en masse (executemany) — volumétrie X3 réelle
+        if sales_rows_db:
+            db.execute(insert(Sale), sales_rows_db)
+        if stock_rows_db:
+            db.execute(insert(StockSnapshot), stock_rows_db)
+        sales_count = len(sales_rows_db)
+        stock_count = len(stock_rows_db)
 
         db.commit()
 
